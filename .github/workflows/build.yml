@@ -1,0 +1,50 @@
+name: build
+
+on:
+  workflow_dispatch:
+    inputs:
+      git_ref:
+        description: 'Git reference (branch, tag, or commit SHA)'
+        required: false
+        default: master
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Build Gamja
+        id: build
+        run: |
+          git clone --depth 1 --branch ${{ github.event.inputs.git_ref }} https://codeberg.org/emersion/gamja.git
+
+          cd gamja
+
+          echo "GAMJA_REF=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+          npm install --include=dev
+          npm run build
+          tar -czvf gamja.tar.gz dist
+
+      - name: Create Release
+        run: |
+          UPLOAD_URL="$(
+            curl -L \
+              -X POST \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              https://api.github.com/repos/${{ github.repository }}/releases \
+              -d '{"tag_name":"gamja-${{ steps.build.outputs.GAMJA_REF }}"}' \
+            | jq --raw-output .upload_url)"
+
+          curl -L \
+            -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -H "Content-Type: application/zip" \
+            "${UPLOAD_URL/'{?name,label}'/?name=gamja.tar.gz}" \
+            --data-binary "@gamja/gamja.tar.gz"
